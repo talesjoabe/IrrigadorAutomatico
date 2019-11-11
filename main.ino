@@ -5,6 +5,9 @@
 
 #define F_CPU 16000000UL /*define a frequência do microcontrolador 16MHz (necessário
  para usar as rotinas de atraso)*/
+#define BAUD   9600    //taxa de 9600 bps
+#define MYUBRR  F_CPU/16/BAUD-1
+
 #include <avr/io.h> //definições do componente especificado
 #include <util/delay.h> //bibliot. para as rotinas de _delay_ms() e delay_us()
 //Definições de macros - para o trabalho com os bits de uma variável
@@ -19,7 +22,45 @@
 
 int cont = 0;
 bool state = false;
+unsigned char *chptr;
 //------------------------------------------------------------------------------------
+
+
+void USART_Inic(unsigned int ubrr)
+{
+  UBRR0H = (unsigned char)(ubrr >> 8); //Ajusta a taxa de transmissão
+  UBRR0L = (unsigned char)ubrr;
+
+  UCSR0A = 0;//desabilitar velocidade dupla (no Arduino é habilitado por padrão)
+  UCSR0B = _BV(RXEN0) | _BV(TXEN0); //Habilita tanto o transmissor quanto o receptor
+  UCSR0C = _BV(UCSZ01) | _BV(UCSZ00); /*modo assíncrono, 8 bits de dados, 1 bit de parada, sem paridade*/
+}
+
+void USART_Transmit(unsigned char info)
+{
+  while(!(UCSR0A & (1<<UDRE0))); // espera a limpeza do registrador de transmissão
+  UDR0 = info; // envia o dado
+}
+
+void escreverMensagem(char *c) {  
+  for (; *c != 0; c++) USART_Transmit(*c);
+}
+
+uint8_t rxByte()
+{
+  //Bit RXC sinaliza quando existem bytes não lidos no buffer
+  while(!(UCSR0A & (1<<RXC0)));
+  return UDR0;
+}
+
+/*
+ * Limpa o registrador de entrada - quando ocorre um erro, por exemplo - 
+ */
+void USART_Flush( void )
+{
+ unsigned char dummy;
+ while ( UCSR0A & (1<<RXC0) ) dummy = UDR0;
+}
 
 // configuração do ADC
 void set_ADC(void)
@@ -95,8 +136,12 @@ void potenciometroEnable(uint8_t ad_value){
        set_ADC();
        while (!(ADCSRA & 0b00010000)); // aguarda conversao
        ad_value = mapFunction(ADC, 0, 1023, 0, 255);
-       Serial.println(ad_value);
-      
+       //chptr = (unsigned char *) &ad_value;
+       //txByte(*chptr);
+       //txByte(*chptr++);
+       //txByte(*chptr++);
+       //txByte(*chptr++);
+       
        if(state) {
         OCR1A = ad_value; 
        } else OCR1A=0;
@@ -112,8 +157,10 @@ void potenciometroEnable(uint8_t ad_value){
 
 int main()
 {
-  Serial.begin(9600);
+  //Serial.begin(9600);
   uint8_t ad_value;
+  USART_Inic(MYUBRR);
+  
  /* Configuração do DDRD
   * 1. PD2, PD3 saídas;
   */
@@ -128,10 +175,13 @@ int main()
  
   while(1){    
     if(!system_on){
-      turnLedOn(PORTD,LED2);
+      turnLedOn(PORTD,LED2);     
       system_on = true; 
+
+      escreverMensagem("Para ligar o sistema, pressione o botão\n\0!");
     }
-    
+   
+     
      if(botaoPressionado(PIND, botao))
      {
        while(botaoPressionado(PIND, botao)); // enquanto eu não soltar o botão
@@ -139,13 +189,17 @@ int main()
        if(tst_bit(PORTD,LED1)){ 
          turnLedOn(PORTD, LED1);
          turnLedOff(PORTD,LED2);
-          
+         
+         escreverMensagem("Sistema ligado! \n\0!");
+         
          setPwmOutput();
          potenciometroEnable(ad_value);
        }
        else{ 
          turnLedOff(PORTD,LED1);
          turnLedOn(PORTD,LED2);
+
+         escreverMensagem("Sistema desligado!\n\0!");
        }
      }
    }
